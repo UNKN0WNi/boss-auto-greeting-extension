@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "BOSS Auto Greeting",
+  "version": "1.0.3",
+  "description": "Controlled auto greeting helper for BOSS Zhipin job result pages.",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://www.zhipin.com/*"
+  ],
+  "action": {
+    "default_title": "BOSS Auto Greeting",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.zhipin.com/web/geek/jobs*",
+        "https://www.zhipin.com/job_detail/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
