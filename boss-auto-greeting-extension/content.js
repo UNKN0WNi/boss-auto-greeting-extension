@@ -13,6 +13,7 @@
     currentTimer: null,
     greetedKeys: new Set(),
     attemptedKeys: new Set(),
+    contactedKeys: new Set(),
     processedCount: 0
   };
 
@@ -78,6 +79,14 @@
 
   function findByText(selectors, regex) {
     return candidates(selectors).find((el) => regex.test(textOf(el)));
+  }
+
+  // "立即沟通" 按钮被点击过之后会变成 "继续沟通"，这类职位不需要再打招呼
+  function isAlreadyContactedButton(el) {
+    if (!el) return false;
+    const text = textOf(el);
+    if (!text) return false;
+    return /继续沟通/.test(text) && !/立即沟通|打招呼|开聊|聊一聊|感兴趣|开始聊天/.test(text);
   }
 
   function jobListRoot() {
@@ -167,7 +176,10 @@
   function nextUnattemptedCard() {
     return jobCards().find((card) => {
       const key = cardKey(card);
-      return key && !state.attemptedKeys.has(key) && !state.greetedKeys.has(key);
+      return key
+        && !state.attemptedKeys.has(key)
+        && !state.greetedKeys.has(key)
+        && !state.contactedKeys.has(key);
     });
   }
 
@@ -177,7 +189,10 @@
     const cards = jobCards();
     const fresh = cards.filter((card) => {
       const key = cardKey(card);
-      return key && !state.attemptedKeys.has(key) && !state.greetedKeys.has(key);
+      return key
+        && !state.attemptedKeys.has(key)
+        && !state.greetedKeys.has(key)
+        && !state.contactedKeys.has(key);
     });
     return `扫描到 ${links.length} 个链接、${cards.length} 个职位、${fresh.length} 个未尝试`;
   }
@@ -219,11 +234,12 @@
 
   function findGreetingButton(scope = document) {
     const selectors = "a,button,.btn,.op-btn,.btn-startchat,[role='button']";
+    const matchGreeting = (el) => /立即沟通|继续沟通|打招呼|感兴趣|聊一聊|开聊/.test(textOf(el)) && !isAlreadyContactedButton(el);
     const button = Array.from(scope.querySelectorAll(selectors))
       .filter(visible)
-      .find((el) => /立即沟通|继续沟通|打招呼|感兴趣|聊一聊|开聊/.test(textOf(el)));
+      .find(matchGreeting);
     if (button) return button;
-    return findByText(selectors, /立即沟通|继续沟通|打招呼|感兴趣|聊一聊|开聊/);
+    return candidates(selectors).find(matchGreeting);
   }
 
   function detailScopes() {
@@ -247,7 +263,7 @@
 
     const listKeys = new Set(jobCards().map((card) => cardKey(card)));
     return candidates("a,button,.btn,.op-btn,.btn-startchat,[role='button']")
-      .filter((el) => /立即沟通|继续沟通|打招呼|感兴趣|聊一聊|开聊/.test(textOf(el)))
+      .filter((el) => /立即沟通|继续沟通|打招呼|感兴趣|聊一聊|开聊/.test(textOf(el)) && !isAlreadyContactedButton(el))
       .find((el) => {
         const card = el.closest(".job-card-wrapper,.job-card-left,.job-list-box li,[ka^='search_list_']");
         return !card || !listKeys.has(cardKey(card));
@@ -366,11 +382,19 @@
 
   async function greetCard(card, settings) {
     const key = cardKey(card);
-    if (!key || state.greetedKeys.has(key)) return false;
+    if (!key || state.greetedKeys.has(key) || state.contactedKeys.has(key)) return false;
 
     await selectCard(card);
     const button = findDetailGreetingButton();
     if (!button) {
+      // 详情页没有可点击的打招呼按钮，再确认一下是不是"立即沟通"已经被点过、变成"继续沟通"
+      const contacted = findByText(
+        "a,button,.btn,.op-btn,.btn-startchat,[role='button']",
+        /继续沟通/
+      );
+      if (contacted) {
+        state.contactedKeys.add(key);
+      }
       return false;
     }
     await clickElement(button);
@@ -490,6 +514,7 @@
       const settings = { ...DEFAULTS, ...(message.settings || {}) };
       state.greetedKeys.clear();
       state.attemptedKeys.clear();
+      state.contactedKeys.clear();
       state.processedCount = 0;
       run(settings);
       sendResponse({ ok: true });
