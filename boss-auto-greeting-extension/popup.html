@@ -69,6 +69,37 @@
         </label>
       </section>
 
+      <section class="filter-box">
+        <div class="section-head">
+          <h2>最低薪资过滤</h2>
+          <span class="hint">0 = 关闭</span>
+        </div>
+
+        <div class="grid-2">
+          <label class="field">
+            <span>最低月薪（K）</span>
+            <input id="minSalary" type="number" min="0" max="200" step="1" placeholder="例如 20">
+          </label>
+
+          <label class="field">
+            <span>判定依据</span>
+            <select id="salaryBasis">
+              <option value="lower">按薪资下限</option>
+              <option value="upper">按薪资上限</option>
+            </select>
+          </label>
+        </div>
+
+        <small class="tip">例：设 20K 时，「按下限」会跳过 15-25K、保留 25-40K；「按上限」会保留 15-25K。</small>
+
+        <label class="check">
+          <input id="skipUnknownSalary" type="checkbox">
+          <span>薪资面议 / 无法识别时也跳过</span>
+        </label>
+
+        <small class="tip">日薪、时薪按每月 21.75 天 × 8 小时折算；默认无法识别时放行，避免误杀。</small>
+      </section>
+
       <label class="check">
         <input id="onlyCurrentPage" type="checkbox">
         <span>只处理当前已加载职位</span>

@@ -114,6 +114,53 @@ check("描述为空时放行", [unknown.pass, Boolean(unknown.unknown)], [true, 
 // 11. 必需词为空字符串时视为不限制
 check("必需词留空不限制", api.evaluate({ excludeKeywords: "", includeKeywords: "  " }, JD).pass, true);
 
+// ---------- 最低薪资过滤 ----------
+
+function checkRange(name, raw, min, max, tolerance = 0.01) {
+  const result = api.parseSalary(raw);
+  if (!result) {
+    failures.push(`${name}\n  期望解析成功，实际返回 null`);
+    return;
+  }
+  const ok = Math.abs(result.min - min) <= tolerance && Math.abs(result.max - max) <= tolerance;
+  if (ok) passed += 1;
+  else failures.push(`${name}\n  期望: [${min}, ${max}]\n  实际: [${result.min}, ${result.max}]`);
+}
+
+checkRange("K 区间", "15-25K", 15, 25);
+checkRange("带 13 薪后缀", "20-40K·13薪", 20, 40);
+checkRange("带 14 薪后缀", "8-12K·14薪", 8, 12);
+checkRange("小写 k 与波浪线", "10~20k", 10, 20);
+checkRange("万元区间折算成 K", "1.5-2.5万/月", 15, 25);
+checkRange("15K 以上单值", "15K以上", 15, 15);
+checkRange("日薪折算成月薪", "300-500元/天", 6.53, 10.88);
+checkRange("卡片混合文本中只取薪资区间", "Java开发工程师 15-25K 3-5年 本科", 15, 25);
+
+check("面议无法识别", api.parseSalary("薪资面议"), null);
+check("经验年限不会被当成薪资", api.parseSalary("3-5年 本科"), null);
+check("关闭时（0）不拦截", api.checkSalary("5-8K", { minSalary: 0 }).pass, true);
+
+const lowSalary = api.checkSalary("15-25K", { minSalary: 20 });
+check("按下限：15-25K 低于 20K 被跳过", [lowSalary.pass, lowSalary.rule], [false, "salary"]);
+check("跳过原因含薪资文本", lowSalary.reason.includes("15-25K"), true);
+
+check(
+  "按上限：15-25K 达到 20K 保留",
+  api.checkSalary("15-25K", { minSalary: 20, salaryBasis: "upper" }).pass,
+  true
+);
+check("按下限：25-40K 保留", api.checkSalary("25-40K", { minSalary: 20 }).pass, true);
+check("13 薪不影响基础月薪判定", api.checkSalary("20-40K·13薪", { minSalary: 20 }).pass, true);
+check("日薪职位按月薪比较", api.checkSalary("300-500元/天", { minSalary: 20 }).pass, false);
+
+const unknownSalary = api.checkSalary("面议", { minSalary: 20 });
+check("薪资未知默认放行", [unknownSalary.pass, Boolean(unknownSalary.unknown)], [true, true]);
+check(
+  "可配置薪资未知时跳过",
+  [api.checkSalary("面议", { minSalary: 20, skipUnknownSalary: true }).pass],
+  [false]
+);
+
 console.log(`通过 ${passed} / ${passed + failures.length}`);
 if (failures.length) {
   console.log("\n失败用例：");

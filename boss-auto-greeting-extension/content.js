@@ -9,7 +9,10 @@
     includeKeywords: "",
     includeMode: "any",
     matchCardInfo: true,
-    caseSensitive: false
+    caseSensitive: false,
+    minSalary: 0,
+    salaryBasis: "lower",
+    skipUnknownSalary: false
   };
 
   const state = {
@@ -309,12 +312,126 @@
       title: cardTitle(card) || "未知职位",
       keyword: verdict.keyword || "",
       reason: verdict.reason || "被过滤",
+      rule: verdict.rule || "filter",
       at: Date.now()
     };
     const { filterLog } = await chrome.storage.local.get("filterLog");
     const list = Array.isArray(filterLog) ? filterLog : [];
     list.unshift(entry);
     await chrome.storage.local.set({ filterLog: list.slice(0, 30) });
+  }
+
+  // ---------- 最低薪资过滤 ----------
+
+  // BOSS 直聘职位卡片常见写法：15-25K、20-40K·13薪、1.5-2.5万、300-500元/天
+  // 统一折算成「千元 / 月」(K)，日薪按 21.75 个工作日、时薪按每天 8 小时估算
+  const DAYS_PER_MONTH = 21.75;
+  const HOURS_PER_DAY = 8;
+  const SALARY_NOISE = /[·•]\s*\d+(?:\.\d+)?\s*薪/g;
+  const RANGE_SEP = "\\s*[-~—－至到]\\s*";
+
+  const SALARY_RANGES = [
+    { re: new RegExp(`(\\d+(?:\\.\\d+)?)${RANGE_SEP}(\\d+(?:\\.\\d+)?)\\s*[kK千]`), unit: 1 },
+    { re: new RegExp(`(\\d+(?:\\.\\d+)?)\\s*[kK千]${RANGE_SEP}(\\d+(?:\\.\\d+)?)\\s*[kK千]?`), unit: 1 },
+    { re: new RegExp(`(\\d+(?:\\.\\d+)?)${RANGE_SEP}(\\d+(?:\\.\\d+)?)\\s*万`), unit: 10 },
+    { re: new RegExp(`(\\d+(?:\\.\\d+)?)\\s*万${RANGE_SEP}(\\d+(?:\\.\\d+)?)\\s*万?`), unit: 10 },
+    { re: new RegExp(`(\\d+(?:\\.\\d+)?)${RANGE_SEP}(\\d+(?:\\.\\d+)?)\\s*元?\\/?\\s*天`), unit: DAYS_PER_MONTH / 1000 },
+    { re: new RegExp(`(\\d+(?:\\.\\d+)?)${RANGE_SEP}(\\d+(?:\\.\\d+)?)\\s*元?\\/?\\s*时`), unit: HOURS_PER_DAY * DAYS_PER_MONTH / 1000 },
+    { re: new RegExp(`(\\d+(?:\\.\\d+)?)${RANGE_SEP}(\\d+(?:\\.\\d+)?)\\s*元?\\/?\\s*月`), unit: 1 / 1000 }
+  ];
+
+  const SALARY_SINGLES = [
+    { re: /(\d+(?:\.\d+)?)\s*[kK千]/, unit: 1 },
+    { re: /(\d+(?:\.\d+)?)\s*万/, unit: 10 },
+    { re: /(\d+(?:\.\d+)?)\s*元?\/?\s*天/, unit: DAYS_PER_MONTH / 1000 },
+    { re: /(\d+(?:\.\d+)?)\s*元?\/?\s*时/, unit: HOURS_PER_DAY * DAYS_PER_MONTH / 1000 },
+    { re: /(\d+(?:\.\d+)?)\s*元?\/?\s*月/, unit: 1 / 1000 }
+  ];
+
+  function parseSalary(raw, allowSingle = true) {
+    const text = String(raw || "")
+      .replace(/\s+/g, "")
+      .replace(SALARY_NOISE, "")
+      .replace(/,/g, "");
+    if (!text || /面议|薪资待议|薪酬面议|待遇面议|保密|不限/.test(text)) return null;
+
+    const build = (a, b, unit) => {
+      const lo = Number(a) * unit;
+      const hi = Number(b) * unit;
+      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+      return {
+        min: Math.round(Math.min(lo, hi) * 100) / 100,
+        max: Math.round(Math.max(lo, hi) * 100) / 100,
+        raw: String(raw).trim().slice(0, 40)
+      };
+    };
+
+    for (const { re, unit } of SALARY_RANGES) {
+      const match = text.match(re);
+      if (match) return build(match[1], match[2], unit);
+    }
+    if (allowSingle) {
+      for (const { re, unit } of SALARY_SINGLES) {
+        const match = text.match(re);
+        if (match) return build(match[1], match[1], unit);
+      }
+    }
+    return null;
+  }
+
+  const SALARY_SELECTORS = ".salary,[class*='salary'],[class*='job-salary'],[class*='job-pay']";
+
+  function salaryTexts(scope) {
+    if (!scope || scope === document || typeof scope.querySelectorAll !== "function") return [];
+    return Array.from(scope.querySelectorAll(SALARY_SELECTORS))
+      .filter(visible)
+      .map(textOf)
+      .filter((text) => text && text.length <= 60);
+  }
+
+  // 优先用薪资元素，读不到再退回整块文本（整块文本只允许识别带单位的区间，避免把"3-5年"当薪资）
+  function readSalary(scope, fallbackText = "", allowSingleFallback = false) {
+    for (const text of salaryTexts(scope).sort((a, b) => a.length - b.length)) {
+      const parsed = parseSalary(text, true);
+      if (parsed) return parsed;
+    }
+    return fallbackText ? parseSalary(fallbackText, allowSingleFallback) : null;
+  }
+
+  function readDetailSalary() {
+    for (const scope of detailScopes()) {
+      if (scope === document || scope === document.body) continue;
+      const parsed = readSalary(scope, "");
+      if (parsed) return parsed;
+    }
+    return null;
+  }
+
+  function salaryEnabled(settings) {
+    return Number(settings.minSalary) > 0;
+  }
+
+  function evaluateSalary(parsed, settings) {
+    const floor = Math.max(0, Number(settings.minSalary) || 0);
+    if (floor <= 0) return { pass: true };
+
+    if (!parsed) {
+      return settings.skipUnknownSalary
+        ? { pass: false, rule: "salary-unknown", keyword: "薪资未知", reason: "薪资面议或无法识别，已跳过" }
+        : { pass: true, unknown: true };
+    }
+
+    const byUpper = settings.salaryBasis === "upper";
+    const value = byUpper ? parsed.max : parsed.min;
+    if (value < floor) {
+      return {
+        pass: false,
+        rule: "salary",
+        keyword: parsed.raw,
+        reason: `薪资 ${parsed.raw} 低于 ${floor}K（按${byUpper ? "上限" : "下限"}判断）`
+      };
+    }
+    return { pass: true };
   }
 
   function nextUnattemptedCard() {
@@ -527,25 +644,47 @@
     return true;
   }
 
+  async function rejectCard(card, key, verdict) {
+    state.filteredKeys.add(key);
+    await recordFiltered(card, verdict);
+    return { sent: false, filtered: true, reason: verdict.reason };
+  }
+
   async function greetCard(card, settings, filters) {
     const key = cardKey(card);
     if (!key || state.greetedKeys.has(key) || state.contactedKeys.has(key) || state.filteredKeys.has(key)) {
       return { sent: false, filtered: false };
     }
 
+    const salaryOn = salaryEnabled(settings);
+    let needDetailSalary = false;
+
+    // 薪资通常写在列表卡片上，先在这里判定，低薪职位连详情都不用点开
+    if (salaryOn) {
+      const fromCard = readSalary(card, textOf(card), false);
+      if (fromCard) {
+        const verdict = evaluateSalary(fromCard, settings);
+        if (!verdict.pass) return rejectCard(card, key, verdict);
+      } else {
+        needDetailSalary = true;
+      }
+    }
+
     const filtersOn = hasFilters(filters);
     const previousDescription = filtersOn ? jobDescriptionText() : "";
     await selectCard(card);
+
+    // 卡片上没读到薪资时，再从详情面板补一次
+    if (needDetailSalary) {
+      const verdict = evaluateSalary(readDetailSalary(), settings);
+      if (!verdict.pass) return rejectCard(card, key, verdict);
+    }
 
     // 详情面板加载完成后再按岗位描述判定，命中过滤词直接跳过，不再点击"立即沟通"
     if (filtersOn) {
       const description = await waitForJobDescription(previousDescription);
       const verdict = evaluateFilters(card, filters, description);
-      if (!verdict.pass) {
-        state.filteredKeys.add(key);
-        await recordFiltered(card, verdict);
-        return { sent: false, filtered: true, reason: verdict.reason };
-      }
+      if (!verdict.pass) return rejectCard(card, key, verdict);
     }
 
     const button = findDetailGreetingButton();
@@ -716,6 +855,10 @@
     parseKeywords,
     jobDescriptionText,
     compile: (raw) => compileFilters({ ...DEFAULTS, ...(raw || {}) }),
-    evaluate: (raw, description) => evaluateFilters(null, compileFilters({ ...DEFAULTS, ...(raw || {}) }), description)
+    evaluate: (raw, description) => evaluateFilters(null, compileFilters({ ...DEFAULTS, ...(raw || {}) }), description),
+    parseSalary,
+    readCardSalary: (card) => readSalary(card, textOf(card || {}), false),
+    readDetailSalary,
+    checkSalary: (raw, rawSettings) => evaluateSalary(parseSalary(raw), { ...DEFAULTS, ...(rawSettings || {}) })
   };
 })();

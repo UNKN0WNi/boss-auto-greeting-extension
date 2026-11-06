@@ -8,7 +8,10 @@ const DEFAULTS = {
   includeKeywords: "",
   includeMode: "any",
   matchCardInfo: true,
-  caseSensitive: false
+  caseSensitive: false,
+  minSalary: 0,
+  salaryBasis: "lower",
+  skipUnknownSalary: false
 };
 
 const els = {
@@ -21,6 +24,9 @@ const els = {
   includeModeAll: document.getElementById("includeModeAll"),
   matchCardInfo: document.getElementById("matchCardInfo"),
   caseSensitive: document.getElementById("caseSensitive"),
+  minSalary: document.getElementById("minSalary"),
+  salaryBasis: document.getElementById("salaryBasis"),
+  skipUnknownSalary: document.getElementById("skipUnknownSalary"),
   onlyCurrentPage: document.getElementById("onlyCurrentPage"),
   sentToday: document.getElementById("sentToday"),
   filteredCount: document.getElementById("filteredCount"),
@@ -47,6 +53,9 @@ function normalizeSettings(raw) {
   settings.includeMode = settings.includeMode === "all" ? "all" : "any";
   settings.matchCardInfo = settings.matchCardInfo !== false;
   settings.caseSensitive = Boolean(settings.caseSensitive);
+  settings.minSalary = Math.max(0, Math.min(200, Number(settings.minSalary) || 0));
+  settings.salaryBasis = settings.salaryBasis === "upper" ? "upper" : "lower";
+  settings.skipUnknownSalary = Boolean(settings.skipUnknownSalary);
   settings.onlyCurrentPage = Boolean(settings.onlyCurrentPage);
   return settings;
 }
@@ -101,6 +110,9 @@ async function load() {
   els.includeModeAll.checked = settings.includeMode === "all";
   els.matchCardInfo.checked = settings.matchCardInfo;
   els.caseSensitive.checked = settings.caseSensitive;
+  els.minSalary.value = settings.minSalary;
+  els.salaryBasis.value = settings.salaryBasis;
+  els.skipUnknownSalary.checked = settings.skipUnknownSalary;
   els.onlyCurrentPage.checked = settings.onlyCurrentPage;
 
   const stats = stored.stats || {};
@@ -130,6 +142,9 @@ async function saveSettings() {
     includeMode: els.includeModeAll.checked ? "all" : "any",
     matchCardInfo: els.matchCardInfo.checked,
     caseSensitive: els.caseSensitive.checked,
+    minSalary: els.minSalary.value,
+    salaryBasis: els.salaryBasis.value,
+    skipUnknownSalary: els.skipUnknownSalary.checked,
     onlyCurrentPage: els.onlyCurrentPage.checked
   });
   await chrome.storage.local.set({ settings });
@@ -170,6 +185,9 @@ for (const input of [
   els.includeModeAll,
   els.matchCardInfo,
   els.caseSensitive,
+  els.minSalary,
+  els.salaryBasis,
+  els.skipUnknownSalary,
   els.onlyCurrentPage
 ]) {
   input.addEventListener("change", saveSettings);

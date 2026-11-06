@@ -67,7 +67,8 @@ h2 {
 }
 
 input,
-textarea {
+textarea,
+select {
   box-sizing: border-box;
   width: 100%;
   border: 1px solid #cbd5e1;
@@ -76,6 +77,11 @@ textarea {
   font: inherit;
   color: #111827;
   background: #ffffff;
+}
+
+.filter-box .tip {
+  display: block;
+  margin-top: -2px;
 }
 
 textarea {
