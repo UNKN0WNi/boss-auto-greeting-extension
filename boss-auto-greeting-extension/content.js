@@ -75,8 +75,39 @@
     return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
   }
 
+  // BOSS 直聘把薪资数字换成私有区码位，靠 kanzhun-mix 自定义字体渲染：
+  // U+E031 ~ U+E03A → 0 ~ 9。直接读 textContent 会是方框字符，需要还原成数字。
+  const PUA_DIGIT_BASE = 0xE031;
+
+  function decodeBossText(raw) {
+    return Array.from(String(raw ?? ""))
+      .map((ch) => {
+        const code = ch.codePointAt(0);
+        if (code >= PUA_DIGIT_BASE && code <= PUA_DIGIT_BASE + 9) {
+          return String(code - PUA_DIGIT_BASE);
+        }
+        // 其它私有区字符、零宽字符、替换符：无法还原就直接去掉，避免日志里出现方框
+        const unreadable = (code >= 0xE000 && code <= 0xF8FF)
+          || (code >= 0xF0000 && code <= 0x10FFFD)
+          || code === 0xFFFD
+          || code === 0xFEFF
+          || code === 0x00AD
+          || (code >= 0x200B && code <= 0x200F)
+          || (code >= 0x2060 && code <= 0x206F);
+        return unreadable ? "" : ch;
+      })
+      .join("");
+  }
+
+  function cleanForDisplay(raw) {
+    return decodeBossText(raw)
+      .replace(/[\u0000-\u001F\u007F]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function textOf(el) {
-    return (el?.innerText || el?.textContent || "").replace(/\s+/g, " ").trim();
+    return decodeBossText(el?.innerText || el?.textContent || "").replace(/\s+/g, " ").trim();
   }
 
   function isBlockingPage() {
@@ -272,8 +303,15 @@
 
   function cardTitle(card) {
     if (!card) return "";
-    const el = card.querySelector(".job-name,.job-title,[class*='job-name'],[class*='job-title']");
-    return (textOf(el) || textOf(card)).slice(0, 60);
+    const el = card.querySelector(".job-name,.job-title,[class*='job-name'],[class*='job-title'],[class*='position-name']");
+    const fromName = textOf(el);
+    const raw = fromName || textOf(card);
+    // 卡片兜底文本里常混着薪资和标签，去掉薪资区间后只留职位信息
+    const cleaned = raw
+      .replace(/\d+(?:\.\d+)?\s*[-~—－至到]\s*\d+(?:\.\d+)?\s*(?:[kK千万]|元\/\s*[天时月])[^\s]*/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return (cleaned || raw).slice(0, 60);
   }
 
   function evaluateFilters(card, filters, description) {
@@ -309,9 +347,9 @@
 
   async function recordFiltered(card, verdict) {
     const entry = {
-      title: cardTitle(card) || "未知职位",
-      keyword: verdict.keyword || "",
-      reason: verdict.reason || "被过滤",
+      title: cleanForDisplay(cardTitle(card)) || "未知职位",
+      keyword: cleanForDisplay(verdict.keyword || ""),
+      reason: cleanForDisplay(verdict.reason || "被过滤"),
       rule: verdict.rule || "filter",
       at: Date.now()
     };
@@ -349,7 +387,9 @@
   ];
 
   function parseSalary(raw, allowSingle = true) {
-    const text = String(raw || "")
+    // 再解一次：即便调用方直接传入了未清洗的 DOM 文本也能正确解析
+    const cleaned = decodeBossText(raw);
+    const text = cleaned
       .replace(/\s+/g, "")
       .replace(SALARY_NOISE, "")
       .replace(/,/g, "");
@@ -362,7 +402,7 @@
       return {
         min: Math.round(Math.min(lo, hi) * 100) / 100,
         max: Math.round(Math.max(lo, hi) * 100) / 100,
-        raw: String(raw).trim().slice(0, 40)
+        raw: cleaned.trim().slice(0, 40)
       };
     };
 
@@ -417,7 +457,7 @@
 
     if (!parsed) {
       return settings.skipUnknownSalary
-        ? { pass: false, rule: "salary-unknown", keyword: "薪资未知", reason: "薪资面议或无法识别，已跳过" }
+        ? { pass: false, rule: "salary-unknown", keyword: "薪资未知", reason: "薪资无法识别（字体加密或面议），已跳过" }
         : { pass: true, unknown: true };
     }
 
@@ -859,6 +899,22 @@
     parseSalary,
     readCardSalary: (card) => readSalary(card, textOf(card || {}), false),
     readDetailSalary,
-    checkSalary: (raw, rawSettings) => evaluateSalary(parseSalary(raw), { ...DEFAULTS, ...(rawSettings || {}) })
+    checkSalary: (raw, rawSettings) => evaluateSalary(parseSalary(raw), { ...DEFAULTS, ...(rawSettings || {}) }),
+    decodeBossText,
+    cleanForDisplay,
+    textOf,
+    // 排查字体映射是否变化：列出页面薪资元素里出现的私有区码位
+    fontChars: () => {
+      const counts = new Map();
+      for (const el of document.querySelectorAll(SALARY_SELECTORS)) {
+        for (const ch of el.textContent || "") {
+          const code = ch.codePointAt(0);
+          if (code >= 0xE000 && code <= 0xF8FF) counts.set(code, (counts.get(code) || 0) + 1);
+        }
+      }
+      return Array.from(counts.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([code, count]) => ({ hex: `0x${code.toString(16).toUpperCase()}`, code, count }));
+    }
   };
 })();

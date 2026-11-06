@@ -161,6 +161,25 @@ check(
   [false]
 );
 
+// ---------- BOSS 薪资字体（PUA）解码 ----------
+
+// U+E031 ~ U+E03A 对应 0 ~ 9
+const E = (digit) => String.fromCodePoint(0xE031 + digit);
+const puaSalary = `${E(1)}${E(5)}-${E(2)}${E(5)}K·${E(1)}${E(3)}薪`; // 15-25K·13薪
+const puaTitle = `后端工程师 ${E(1)}${E(5)}-${E(2)}${E(5)}K`;
+
+check("解码私有区数字", api.decodeBossText(puaSalary), "15-25K·13薪");
+check("textOf 自动解码", api.textOf({ innerText: puaTitle }), "后端工程师 15-25K");
+check("解码后可正常解析薪资", [api.parseSalary(puaSalary).min, api.parseSalary(puaSalary).max], [15, 25]);
+check("parseSalary 直接接收乱码文本", api.parseSalary(puaSalary).raw, "15-25K·13薪");
+check("乱码薪资也按最低月薪判定", api.checkSalary(puaSalary, { minSalary: 20 }).pass, false);
+check("乱码薪资达标时放行", api.checkSalary(`${E(2)}${E(5)}-${E(4)}${E(0)}K`, { minSalary: 20 }).pass, true);
+
+const unknownPua = `后端${String.fromCodePoint(0xE100)}工程师${String.fromCodePoint(0xE101)}`;
+check("未知私有区字符被清除", api.decodeBossText(unknownPua), "后端工程师");
+check("展示文本不再含方框字符", /[\uE000-\uF8FF]/.test(api.cleanForDisplay(unknownPua)), false);
+check("零宽字符被清除", api.cleanForDisplay("薪资\u200B面议"), "薪资面议");
+
 console.log(`通过 ${passed} / ${passed + failures.length}`);
 if (failures.length) {
   console.log("\n失败用例：");

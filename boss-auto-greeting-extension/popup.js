@@ -73,6 +73,25 @@ async function sendToActiveTab(payload) {
   return chrome.tabs.sendMessage(tab.id, payload);
 }
 
+// 历史记录里可能存着 BOSS 薪资字体的私有区字符，渲染前统一清掉，避免显示方框
+function cleanText(value) {
+  return Array.from(String(value ?? ""))
+    .map((ch) => {
+      const code = ch.codePointAt(0);
+      const unreadable = (code >= 0xE000 && code <= 0xF8FF)
+        || (code >= 0xF0000 && code <= 0x10FFFD)
+        || code === 0xFFFD
+        || code === 0xFEFF
+        || (code >= 0x200B && code <= 0x200F);
+      return unreadable ? "" : ch;
+    })
+    .join("")
+    // 旧记录里数字被清掉后会留下 " -K" 这类残片
+    .replace(/[\s\-~—－至到]+[kK千万]\S*\s*$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function renderFilterLog(entries) {
   const list = els.filterLogList;
   list.textContent = "";
@@ -89,10 +108,10 @@ function renderFilterLog(entries) {
     const item = document.createElement("li");
     const title = document.createElement("span");
     title.className = "log-title";
-    title.textContent = entry?.title || "未知职位";
+    title.textContent = cleanText(entry?.title) || "未知职位";
     const reason = document.createElement("span");
     reason.className = "log-reason";
-    reason.textContent = entry?.reason || "被过滤";
+    reason.textContent = cleanText(entry?.reason) || "被过滤";
     item.append(title, reason);
     list.appendChild(item);
   }
@@ -123,7 +142,7 @@ async function load() {
   const running = Boolean(runner.running);
   els.statusBadge.textContent = running ? "运行中" : "待机";
   els.statusBadge.classList.toggle("running", running);
-  els.lastStatus.textContent = runner.lastStatus || "未开始";
+  els.lastStatus.textContent = cleanText(runner.lastStatus) || "未开始";
   els.filteredCount.textContent = String(Number(runner.filteredCount || 0));
   els.startBtn.disabled = running;
   els.stopBtn.disabled = !running;
