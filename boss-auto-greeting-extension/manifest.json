@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BOSS Auto Greeting",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Controlled auto greeting helper for BOSS Zhipin job result pages, with job description keyword and minimum salary filters.",
   "permissions": [
     "storage",

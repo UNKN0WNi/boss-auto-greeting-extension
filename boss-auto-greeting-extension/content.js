@@ -314,6 +314,76 @@
     return (cleaned || raw).slice(0, 60);
   }
 
+  // ---------- 过滤记录里的公司名 ----------
+
+  // 卡片上公司名常见写法；命中容器时再往里找链接/标题，避免把行业、规模一起带进日志
+  const CARD_COMPANY_SELECTORS = [
+    ".company-name",
+    ".company-title",
+    "[class*='company-name']",
+    "[class*='companyName']",
+    "[class*='company-title']",
+    "[class*='company-info'] a"
+  ];
+  const DETAIL_COMPANY_SELECTORS = [
+    ".company-info .name",
+    ".company-info h3",
+    ".company-info a",
+    "[class*='company-name']",
+    "[class*='companyName']",
+    ".job-detail-company [class*='name']",
+    ".sider-company [class*='name']"
+  ];
+  // 融资阶段、规模等标签常和公司名挤在同一个容器里
+  const COMPANY_NOISE = /(已上市|未上市|不需要融资|融资未公开|未融资|天使轮|[A-E]轮|Pre-A|民营|国企|上市公司|\d+\s*-\s*\d+人|\d+人以上|\d+人以下|\d+人)/gi;
+  const COMPANY_IN_TEXT = /[\u4e00-\u9fa5A-Za-z0-9（）()·]{2,24}(?:有限公司|股份公司|集团|科技|信息技术|网络|软件|数据|智能|传媒|教育|咨询|研究院|事务所|工作室|公司)/;
+
+  function normalizeCompany(raw) {
+    const text = cleanForDisplay(String(raw || ""))
+      .replace(COMPANY_NOISE, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text || text.length > 40 || /^\d/.test(text)) return "";
+    return text;
+  }
+
+  function readCompany(scope, selectors) {
+    if (!scope || typeof scope.querySelectorAll !== "function") return "";
+    for (const selector of selectors) {
+      for (const el of Array.from(scope.querySelectorAll(selector))) {
+        const own = normalizeCompany(textOf(el));
+        if (own) return own;
+        if (typeof el.querySelectorAll !== "function") continue;
+        for (const child of Array.from(el.querySelectorAll("a,h3,.name,[class*='name'],span"))) {
+          const inner = normalizeCompany(textOf(child));
+          if (inner) return inner;
+        }
+      }
+    }
+    return "";
+  }
+
+  function cardCompany(card, allowDetail = false) {
+    const fromCard = readCompany(card, CARD_COMPANY_SELECTORS);
+    if (fromCard) return fromCard;
+    const fromText = companyFromText(textOf(card));
+    if (fromText) return fromText;
+
+    // 只有确认已点开当前职位详情后才用详情面板兜底，避免误记上一个职位的公司
+    if (!allowDetail) return "";
+    for (const scope of detailScopes()) {
+      if (scope === document || scope === document.body) continue;
+      const fromDetail = readCompany(scope, DETAIL_COMPANY_SELECTORS);
+      if (fromDetail) return fromDetail;
+    }
+    return "";
+  }
+
+  function companyFromText(raw) {
+    const match = cleanForDisplay(raw).match(COMPANY_IN_TEXT);
+    return match ? match[0].slice(0, 40) : "";
+  }
+
   function evaluateFilters(card, filters, description) {
     if (!hasFilters(filters)) return { pass: true };
 
@@ -345,14 +415,28 @@
     return { pass: true };
   }
 
-  async function recordFiltered(card, verdict) {
-    const entry = {
-      title: cleanForDisplay(cardTitle(card)) || "未知职位",
+  function filterLogEntry(card, verdict, allowDetailCompany = false) {
+    const company = cardCompany(card, allowDetailCompany);
+    let title = cleanForDisplay(cardTitle(card)) || "未知职位";
+    // 找不到职位名元素时，cardTitle 会用整块卡片文本兜底，里面常含公司名；
+    // 这里把重复的公司名及其后面的标签裁掉，避免日志里出现两次
+    if (company && title.includes(company)) {
+      const head = cleanForDisplay(title.slice(0, title.indexOf(company)))
+        .replace(/[\s·•|｜,，、\-]+$/, "");
+      if (head) title = head;
+    }
+    return {
+      title,
+      company,
       keyword: cleanForDisplay(verdict.keyword || ""),
       reason: cleanForDisplay(verdict.reason || "被过滤"),
       rule: verdict.rule || "filter",
       at: Date.now()
     };
+  }
+
+  async function recordFiltered(card, verdict, allowDetailCompany = false) {
+    const entry = filterLogEntry(card, verdict, allowDetailCompany);
     const { filterLog } = await chrome.storage.local.get("filterLog");
     const list = Array.isArray(filterLog) ? filterLog : [];
     list.unshift(entry);
@@ -684,9 +768,9 @@
     return true;
   }
 
-  async function rejectCard(card, key, verdict) {
+  async function rejectCard(card, key, verdict, allowDetailCompany = false) {
     state.filteredKeys.add(key);
-    await recordFiltered(card, verdict);
+    await recordFiltered(card, verdict, allowDetailCompany);
     return { sent: false, filtered: true, reason: verdict.reason };
   }
 
@@ -717,14 +801,14 @@
     // 卡片上没读到薪资时，再从详情面板补一次
     if (needDetailSalary) {
       const verdict = evaluateSalary(readDetailSalary(), settings);
-      if (!verdict.pass) return rejectCard(card, key, verdict);
+      if (!verdict.pass) return rejectCard(card, key, verdict, true);
     }
 
     // 详情面板加载完成后再按岗位描述判定，命中过滤词直接跳过，不再点击"立即沟通"
     if (filtersOn) {
       const description = await waitForJobDescription(previousDescription);
       const verdict = evaluateFilters(card, filters, description);
-      if (!verdict.pass) return rejectCard(card, key, verdict);
+      if (!verdict.pass) return rejectCard(card, key, verdict, true);
     }
 
     const button = findDetailGreetingButton();
@@ -903,6 +987,10 @@
     decodeBossText,
     cleanForDisplay,
     textOf,
+    cardCompany,
+    companyFromText,
+    normalizeCompany,
+    filterLogEntry,
     // 排查字体映射是否变化：列出页面薪资元素里出现的私有区码位
     fontChars: () => {
       const counts = new Map();

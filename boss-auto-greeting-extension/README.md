@@ -45,7 +45,7 @@
 **结果反馈**：
 
 - 弹窗显示“本轮已过滤”计数和当前状态（含命中的词）。
-- “最近过滤”列表保存最近 30 条记录（展示前 12 条），含职位标题与命中原因，方便回头调整关键词。
+- “最近过滤”列表保存最近 30 条记录（展示前 12 条），含**职位标题 + 公司名**与命中原因，方便回头调整关键词。公司名优先取列表卡片上的公司元素，读不到时从卡片文本、详情面板依次兜底；旧记录没有公司名时只显示职位标题。
 - 每次点“开始”自动清空记录；也可用“清空”按钮手动清空。
 
 **调试**：在职位页控制台执行：
@@ -63,9 +63,11 @@ __bossFilter.parseSalary("20-40K·13薪")            // => { min: 20, max: 40, r
 __bossFilter.checkSalary("15-25K", { minSalary: 20 })
 // => { pass: false, rule: "salary", keyword: "15-25K", reason: "薪资 15-25K 低于 20K（按下限判断）" }
 __bossFilter.readDetailSalary()                    // 查看当前详情页读到的薪资
+__bossFilter.cardCompany(card)                    // 查看某张卡片识别到的公司名
+__bossFilter.filterLogEntry(card, { reason: "命中排除词「外包」" })  // 查看会写入日志的条目
 ```
 
-若 `jobDescriptionText()` 返回空，说明 BOSS 直聘页面结构变了，需要调整 `content.js` 里的 `JD_SELECTORS`。
+若 `jobDescriptionText()` 返回空，说明 BOSS 直聘页面结构变了，需要调整 `content.js` 里的 `JD_SELECTORS`。公司名读不到时调整 `CARD_COMPANY_SELECTORS` / `DETAIL_COMPANY_SELECTORS`。
 
 > 注意：关键词是**纯子串匹配**，描述里写“本公司不外包”也会命中“外包”，建议填更具体的词。运行途中修改过滤词不会立即生效，下一次点“开始”才应用。
 
@@ -114,7 +116,7 @@ __bossFilter.fontChars()                                     // 列出页面薪�
 - 默认只处理当前已经加载出来的职位。
 - 遇到登录、验证码、安全验证、账号异常、访问过于频繁等页面会停止。
 - 不读取 cookies、密码、简历文件或浏览器账号数据。
-- 页面结构变化时，可能需要调整 `content.js` 里的按钮匹配规则（`JD_SELECTORS` 对应岗位描述，`SALARY_SELECTORS` 对应薪资）。
+- 页面结构变化时，可能需要调整 `content.js` 里的按钮匹配规则（`JD_SELECTORS` 对应岗位描述，`SALARY_SELECTORS` 对应薪资，`CARD_COMPANY_SELECTORS` 对应公司名）。
 
 ## 开发
 
@@ -122,4 +124,4 @@ __bossFilter.fontChars()                                     // 列出页面薪�
 node tests/filter-rules.test.mjs   # 过滤规则单测，零依赖，不需要 Chrome
 ```
 
-测试用最小 DOM 桩直接加载 `content.js`，覆盖分隔符解析、排除词、必需词（任一/全部）、大小写、优先级、描述缺失，以及薪资格式解析、单位折算、上下限判定、未知薪资策略、字体私有区字符解码等场景。
+测试用最小 DOM 桩直接加载 `content.js`，覆盖分隔符解析、排除词、必需词（任一/全部）、大小写、优先级、描述缺失，以及薪资格式解析、单位折算、上下限判定、未知薪资策略、字体私有区字符解码、公司名提取与日志条目生成等场景。

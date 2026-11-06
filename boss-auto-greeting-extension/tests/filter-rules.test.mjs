@@ -180,6 +180,57 @@ check("未知私有区字符被清除", api.decodeBossText(unknownPua), "后端�
 check("展示文本不再含方框字符", /[\uE000-\uF8FF]/.test(api.cleanForDisplay(unknownPua)), false);
 check("零宽字符被清除", api.cleanForDisplay("薪资\u200B面议"), "薪资面议");
 
+// ---------- 过滤记录里的公司名 ----------
+
+function node(text, children = []) {
+  return {
+    innerText: text,
+    querySelectorAll: (sel) => (sel === "a,h3,.name,[class*='name'],span" ? children : []),
+    querySelector: () => null
+  };
+}
+
+function fakeCard(text, companyNodes = []) {
+  return {
+    innerText: text,
+    querySelectorAll: (sel) => (sel.includes("company-name") ? companyNodes : []),
+    querySelector: () => null
+  };
+}
+
+const COMPANY = "北京星辰科技有限公司";
+const verdict = { reason: "命中排除词「外包」", rule: "exclude", keyword: "外包" };
+
+const cardWithCompany = fakeCard(`后端工程师 15-25K ${COMPANY} 已上市 1000-9999人`, [node(COMPANY)]);
+const entryWithCompany = api.filterLogEntry(cardWithCompany, verdict);
+check("过滤记录带公司名", entryWithCompany.company, COMPANY);
+check("职位名里不再重复公司名", entryWithCompany.title, "后端工程师");
+check("公司名不影响过滤原因", [entryWithCompany.reason, entryWithCompany.rule], ["命中排除词「外包」", "exclude"]);
+
+const noisy = fakeCard("后端工程师 15-25K", [node(`${COMPANY} 已上市 1000-9999人`)]);
+check("公司名去掉融资阶段与规模噪音", api.filterLogEntry(noisy, verdict).company, COMPANY);
+
+const longContainer = node(
+  `${COMPANY} 互联网电子商务 计算机软件 企业服务 数据服务 北京市朝阳区 望京 甲级写字楼`,
+  [node(COMPANY)]
+);
+check(
+  "命中大容器时取内部公司名元素",
+  api.filterLogEntry(fakeCard("后端工程师", [longContainer]), verdict).company,
+  COMPANY
+);
+
+const textOnlyCard = fakeCard(`后端工程师 15-25K ${COMPANY} 已上市`);
+check("卡片无公司元素时从文本兜底提取", api.filterLogEntry(textOnlyCard, verdict).company, COMPANY);
+check("cardCompany 调试接口可用", api.cardCompany(textOnlyCard), COMPANY);
+
+const noCompanyCard = fakeCard("后端工程师 15-25K 3-5年 本科");
+check("无公司信息时字段为空", api.filterLogEntry(noCompanyCard, verdict).company, "");
+check("无可用详情面板时不会误记别的公司", api.filterLogEntry(noCompanyCard, verdict, true).company, "");
+
+const puaCompanyCard = fakeCard("后端工程师", [node(`星辰${String.fromCodePoint(0xE100)}科技有限公司`)]);
+check("公司名里的私有区字符被清除", api.filterLogEntry(puaCompanyCard, verdict).company, "星辰科技有限公司");
+
 console.log(`通过 ${passed} / ${passed + failures.length}`);
 if (failures.length) {
   console.log("\n失败用例：");

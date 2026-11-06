@@ -179,7 +179,7 @@ strong {
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
-  max-height: 104px;
+  max-height: 150px;
   overflow-y: auto;
 }
 
@@ -203,9 +203,13 @@ strong {
 .log-title {
   color: #1f2937;
   font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.log-company {
+  color: #64748b;
+  font-weight: 400;
 }
 
 .log-reason {

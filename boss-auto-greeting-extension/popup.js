@@ -109,6 +109,13 @@ function renderFilterLog(entries) {
     const title = document.createElement("span");
     title.className = "log-title";
     title.textContent = cleanText(entry?.title) || "未知职位";
+    const company = cleanText(entry?.company);
+    if (company) {
+      const companyEl = document.createElement("span");
+      companyEl.className = "log-company";
+      companyEl.textContent = ` · ${company}`;
+      title.appendChild(companyEl);
+    }
     const reason = document.createElement("span");
     reason.className = "log-reason";
     reason.textContent = cleanText(entry?.reason) || "被过滤";
