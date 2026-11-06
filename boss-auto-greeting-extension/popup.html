@@ -18,20 +18,56 @@
         <input id="dailyLimit" type="number" min="1" max="100" step="1">
       </label>
 
-      <label class="field">
-        <span>最小间隔（秒）</span>
-        <input id="minDelay" type="number" min="3" max="120" step="1">
-      </label>
+      <div class="grid-2">
+        <label class="field">
+          <span>最小间隔（秒）</span>
+          <input id="minDelay" type="number" min="3" max="120" step="1">
+        </label>
 
-      <label class="field">
-        <span>最大间隔（秒）</span>
-        <input id="maxDelay" type="number" min="5" max="180" step="1">
-      </label>
+        <label class="field">
+          <span>最大间隔（秒）</span>
+          <input id="maxDelay" type="number" min="5" max="180" step="1">
+        </label>
+      </div>
 
       <label class="field">
         <span>打招呼内容</span>
-        <textarea id="message" rows="4" maxlength="180"></textarea>
+        <textarea id="message" rows="3" maxlength="180"></textarea>
       </label>
+
+      <section class="filter-box">
+        <div class="section-head">
+          <h2>岗位描述过滤</h2>
+          <span class="hint">命中排除词即跳过</span>
+        </div>
+
+        <label class="field">
+          <span>排除词</span>
+          <textarea id="excludeKeywords" rows="4" placeholder="外包&#10;驻场&#10;销售&#10;单休"></textarea>
+          <small class="tip">换行或逗号分隔，不区分大小写</small>
+        </label>
+
+        <label class="field">
+          <span>必需词（留空则不限制）</span>
+          <textarea id="includeKeywords" rows="2" placeholder="Spring&#10;Vue"></textarea>
+          <small class="tip">非空时，描述里必须出现这些词才会打招呼</small>
+        </label>
+
+        <label class="check">
+          <input id="includeModeAll" type="checkbox">
+          <span>必需词需全部出现（否则命中任一即可）</span>
+        </label>
+
+        <label class="check">
+          <input id="matchCardInfo" type="checkbox">
+          <span>同时匹配职位标题、公司名</span>
+        </label>
+
+        <label class="check">
+          <input id="caseSensitive" type="checkbox">
+          <span>区分英文大小写</span>
+        </label>
+      </section>
 
       <label class="check">
         <input id="onlyCurrentPage" type="checkbox">
@@ -44,9 +80,22 @@
           <strong id="sentToday">0</strong>
         </div>
         <div>
-          <span class="label">本轮状态</span>
-          <strong id="lastStatus">未开始</strong>
+          <span class="label">本轮已过滤</span>
+          <strong id="filteredCount">0</strong>
         </div>
+      </section>
+
+      <div class="status-row">
+        <span class="label">本轮状态</span>
+        <strong id="lastStatus">未开始</strong>
+      </div>
+
+      <section class="log-box">
+        <div class="section-head">
+          <h2>最近过滤</h2>
+          <button id="clearLogBtn" class="link" type="button">清空</button>
+        </div>
+        <ul id="filterLogList" class="log-list"></ul>
       </section>
 
       <div class="actions">

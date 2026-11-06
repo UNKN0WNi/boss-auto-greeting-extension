@@ -4,7 +4,12 @@
     minDelay: 8,
     maxDelay: 18,
     message: "您好，我对这个岗位很感兴趣，想进一步了解一下，谢谢。",
-    onlyCurrentPage: true
+    onlyCurrentPage: true,
+    excludeKeywords: "",
+    includeKeywords: "",
+    includeMode: "any",
+    matchCardInfo: true,
+    caseSensitive: false
   };
 
   const state = {
@@ -14,7 +19,10 @@
     greetedKeys: new Set(),
     attemptedKeys: new Set(),
     contactedKeys: new Set(),
-    processedCount: 0
+    filteredKeys: new Set(),
+    filteredCount: 0,
+    processedCount: 0,
+    jdMisses: 0
   };
 
   const sleep = (ms) => new Promise((resolve) => {
@@ -173,13 +181,150 @@
     return link?.href ? normalizeJobHref(link.href) : textOf(card).slice(0, 120);
   }
 
+  // ---------- 岗位描述过滤 ----------
+
+  const KEYWORD_SPLIT = /[\n\r,，;；、|]+/;
+
+  // 支持换行、中英文逗号、分号、顿号、竖线分隔；去空去重
+  function parseKeywords(raw) {
+    const seen = new Set();
+    return String(raw || "")
+      .split(KEYWORD_SPLIT)
+      .map((word) => word.replace(/\s+/g, " ").trim())
+      .filter((word) => {
+        if (!word || seen.has(word)) return false;
+        seen.add(word);
+        return true;
+      });
+  }
+
+  function compileFilters(settings) {
+    const caseSensitive = Boolean(settings.caseSensitive);
+    const toMatcher = (word) => ({
+      label: word,
+      value: caseSensitive ? word : word.toLowerCase()
+    });
+    return {
+      excludes: parseKeywords(settings.excludeKeywords).map(toMatcher),
+      includes: parseKeywords(settings.includeKeywords).map(toMatcher),
+      requireAll: settings.includeMode === "all",
+      caseSensitive,
+      matchCardInfo: settings.matchCardInfo !== false
+    };
+  }
+
+  function hasFilters(filters) {
+    return Boolean(filters && (filters.excludes.length || filters.includes.length));
+  }
+
+  const JD_SELECTORS = [
+    ".job-sec-text",
+    ".job-detail-section",
+    ".job-detail-body",
+    ".job-detail-content",
+    ".job-desc",
+    ".detail-content",
+    ".job-detail"
+  ];
+
+  function jobDescriptionText() {
+    const parts = [];
+    for (const selector of JD_SELECTORS) {
+      for (const el of candidates(selector)) {
+        const text = textOf(el);
+        if (text && !parts.includes(text)) parts.push(text);
+      }
+      // 已经拿到正文就不必再收集更外层的容器，避免重复
+      if (parts.join("\n").length > 80) break;
+    }
+
+    if (!parts.length) {
+      for (const scope of detailScopes()) {
+        // 兜底不要退化成整页文本，否则左侧其它职位的内容也会混进匹配
+        if (scope === document || scope === document.body) continue;
+        const text = textOf(scope);
+        if (text) parts.push(text);
+      }
+    }
+
+    return parts.join("\n").slice(0, 8000);
+  }
+
+  // 详情面板异步渲染，等正文更新后再判定，避免用上一个职位的描述做过滤
+  async function waitForJobDescription(previous = "") {
+    const budget = state.jdMisses >= 2 ? 700 : 2600;
+    const deadline = Date.now() + budget;
+    let text = jobDescriptionText();
+    const ready = (value) => value.length >= 40 && (!previous || value !== previous);
+
+    while (!ready(text) && Date.now() < deadline) {
+      await sleep(250);
+      const next = jobDescriptionText();
+      if (next) text = next;
+    }
+
+    state.jdMisses = text.length < 40 ? state.jdMisses + 1 : 0;
+    return text;
+  }
+
+  function cardTitle(card) {
+    if (!card) return "";
+    const el = card.querySelector(".job-name,.job-title,[class*='job-name'],[class*='job-title']");
+    return (textOf(el) || textOf(card)).slice(0, 60);
+  }
+
+  function evaluateFilters(card, filters, description) {
+    if (!hasFilters(filters)) return { pass: true };
+
+    const chunks = [description];
+    if (filters.matchCardInfo) chunks.push(textOf(card));
+    const raw = chunks.filter(Boolean).join("\n");
+    if (!raw.trim()) return { pass: true, unknown: true };
+
+    const text = filters.caseSensitive ? raw : raw.toLowerCase();
+
+    const excluded = filters.excludes.find((item) => text.includes(item.value));
+    if (excluded) {
+      return { pass: false, rule: "exclude", keyword: excluded.label, reason: `命中排除词「${excluded.label}」` };
+    }
+
+    if (!filters.includes.length) return { pass: true };
+
+    const hits = filters.includes.filter((item) => text.includes(item.value));
+    if (filters.requireAll && hits.length < filters.includes.length) {
+      const missing = filters.includes.find((item) => !text.includes(item.value));
+      return { pass: false, rule: "require-all", keyword: missing.label, reason: `缺少必需词「${missing.label}」` };
+    }
+
+    if (!filters.requireAll && !hits.length) {
+      const labels = filters.includes.map((item) => item.label).join(" / ");
+      return { pass: false, rule: "require-any", keyword: labels, reason: `未命中任一必需词（${labels}）` };
+    }
+
+    return { pass: true };
+  }
+
+  async function recordFiltered(card, verdict) {
+    const entry = {
+      title: cardTitle(card) || "未知职位",
+      keyword: verdict.keyword || "",
+      reason: verdict.reason || "被过滤",
+      at: Date.now()
+    };
+    const { filterLog } = await chrome.storage.local.get("filterLog");
+    const list = Array.isArray(filterLog) ? filterLog : [];
+    list.unshift(entry);
+    await chrome.storage.local.set({ filterLog: list.slice(0, 30) });
+  }
+
   function nextUnattemptedCard() {
     return jobCards().find((card) => {
       const key = cardKey(card);
       return key
         && !state.attemptedKeys.has(key)
         && !state.greetedKeys.has(key)
-        && !state.contactedKeys.has(key);
+        && !state.contactedKeys.has(key)
+        && !state.filteredKeys.has(key);
     });
   }
 
@@ -192,9 +337,11 @@
       return key
         && !state.attemptedKeys.has(key)
         && !state.greetedKeys.has(key)
-        && !state.contactedKeys.has(key);
+        && !state.contactedKeys.has(key)
+        && !state.filteredKeys.has(key);
     });
-    return `扫描到 ${links.length} 个链接、${cards.length} 个职位、${fresh.length} 个未尝试`;
+    const filteredPart = state.filteredCount ? `、已过滤 ${state.filteredCount} 个` : "";
+    return `扫描到 ${links.length} 个链接、${cards.length} 个职位、${fresh.length} 个未尝试${filteredPart}`;
   }
 
   function cardClickTarget(card) {
@@ -380,11 +527,27 @@
     return true;
   }
 
-  async function greetCard(card, settings) {
+  async function greetCard(card, settings, filters) {
     const key = cardKey(card);
-    if (!key || state.greetedKeys.has(key) || state.contactedKeys.has(key)) return false;
+    if (!key || state.greetedKeys.has(key) || state.contactedKeys.has(key) || state.filteredKeys.has(key)) {
+      return { sent: false, filtered: false };
+    }
 
+    const filtersOn = hasFilters(filters);
+    const previousDescription = filtersOn ? jobDescriptionText() : "";
     await selectCard(card);
+
+    // 详情面板加载完成后再按岗位描述判定，命中过滤词直接跳过，不再点击"立即沟通"
+    if (filtersOn) {
+      const description = await waitForJobDescription(previousDescription);
+      const verdict = evaluateFilters(card, filters, description);
+      if (!verdict.pass) {
+        state.filteredKeys.add(key);
+        await recordFiltered(card, verdict);
+        return { sent: false, filtered: true, reason: verdict.reason };
+      }
+    }
+
     const button = findDetailGreetingButton();
     if (!button) {
       // 详情页没有可点击的打招呼按钮，再确认一下是不是"立即沟通"已经被点过、变成"继续沟通"
@@ -395,12 +558,12 @@
       if (contacted) {
         state.contactedKeys.add(key);
       }
-      return false;
+      return { sent: false, filtered: false };
     }
     await clickElement(button);
     const sent = await confirmGreeting(settings);
     if (sent) state.greetedKeys.add(key);
-    return sent;
+    return { sent, filtered: false };
   }
 
   async function maybeLoadMore(settings) {
@@ -441,7 +604,8 @@
     if (state.running) return;
     state.running = true;
     state.stopped = false;
-    await setRunner({ running: true, lastStatus: "运行中" });
+    const filters = compileFilters(settings);
+    await setRunner({ running: true, lastStatus: "运行中", filteredCount: 0 });
 
     try {
       while (!state.stopped) {
@@ -476,12 +640,20 @@
           const key = cardKey(card);
           state.attemptedKeys.add(key);
           state.processedCount += 1;
-          await setRunner({ running: true, lastStatus: `准备打招呼：第 ${state.processedCount} 个职位` });
-          const sent = await greetCard(card, settings);
-          if (sent) {
+          await setRunner({ running: true, lastStatus: `准备处理：第 ${state.processedCount} 个职位` });
+          const result = await greetCard(card, settings, filters);
+          if (result.sent) {
             const next = await incrementSent();
-            await setRunner({ running: true, lastStatus: `已打招呼 ${next.sent} 个` });
+            await setRunner({ running: true, lastStatus: `已打招呼 ${next.sent} 个`, filteredCount: state.filteredCount });
             await sleep(randomDelay(settings));
+          } else if (result.filtered) {
+            state.filteredCount += 1;
+            await setRunner({
+              running: true,
+              lastStatus: `已过滤 ${state.filteredCount} 个：${result.reason}`,
+              filteredCount: state.filteredCount
+            });
+            await sleep(400 + Math.floor(Math.random() * 400));
           } else {
             await sleep(600);
           }
@@ -489,7 +661,8 @@
 
         if (state.stopped) break;
         if (!(await maybeLoadMore(settings))) {
-          await setRunner({ running: false, lastStatus: "当前页面没有更多可处理职位" });
+          const filteredPart = state.filteredCount ? `，其中 ${state.filteredCount} 个被过滤词跳过` : "";
+          await setRunner({ running: false, lastStatus: `当前页面没有更多可处理职位${filteredPart}` });
           break;
         }
       }
@@ -515,7 +688,11 @@
       state.greetedKeys.clear();
       state.attemptedKeys.clear();
       state.contactedKeys.clear();
+      state.filteredKeys.clear();
+      state.filteredCount = 0;
       state.processedCount = 0;
+      state.jdMisses = 0;
+      chrome.storage.local.set({ filterLog: [] });
       run(settings);
       sendResponse({ ok: true });
       return true;
@@ -533,4 +710,12 @@
 
     return false;
   });
+
+  // 调试用：在职位页控制台执行 __bossFilter.evaluate({ excludeKeywords: "外包" }, "某段岗位描述")
+  window.__bossFilter = {
+    parseKeywords,
+    jobDescriptionText,
+    compile: (raw) => compileFilters({ ...DEFAULTS, ...(raw || {}) }),
+    evaluate: (raw, description) => evaluateFilters(null, compileFilters({ ...DEFAULTS, ...(raw || {}) }), description)
+  };
 })();

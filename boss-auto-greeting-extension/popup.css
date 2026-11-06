@@ -4,7 +4,9 @@
 }
 
 body {
-  width: 340px;
+  width: 348px;
+  max-height: 600px;
+  overflow-y: auto;
   margin: 0;
   color: #1f2937;
   background: #f6f7f9;
@@ -26,6 +28,13 @@ h1 {
   margin: 0;
   font-size: 18px;
   line-height: 1.2;
+}
+
+h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
 }
 
 .badge {
@@ -51,6 +60,12 @@ h1 {
   font-size: 13px;
 }
 
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 input,
 textarea {
   box-sizing: border-box;
@@ -65,17 +80,47 @@ textarea {
 
 textarea {
   resize: vertical;
+  line-height: 1.5;
+}
+
+.tip {
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.filter-box,
+.log-box {
+  border: 1px solid #dde3ec;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 14px 0;
+  background: #ffffff;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.hint {
+  color: #94a3b8;
+  font-size: 11px;
 }
 
 .check {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 12px 0;
-  font-size: 13px;
+  margin: 10px 0;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .check input {
+  flex: 0 0 auto;
   width: 16px;
   height: 16px;
 }
@@ -84,7 +129,7 @@ textarea {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin: 14px 0;
+  margin: 12px 0;
 }
 
 .stats div {
@@ -105,10 +150,61 @@ strong {
   font-size: 14px;
 }
 
-.actions {
+.status-row {
+  border: 1px solid #d9e0e9;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+  font-size: 12px;
+}
+
+.status-row strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.log-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 104px;
+  overflow-y: auto;
+}
+
+.log-list li {
+  display: grid;
+  gap: 2px;
+  border-left: 3px solid #f0b429;
+  border-radius: 4px;
+  padding: 5px 8px;
+  background: #fbfcfe;
+  font-size: 12px;
+}
+
+.log-list li.empty {
+  border-left-color: #dbe2ec;
+  color: #94a3b8;
+  background: transparent;
+  padding-left: 8px;
+}
+
+.log-title {
+  color: #1f2937;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-reason {
+  color: #b45309;
+  font-size: 11px;
 }
 
 button {
@@ -131,4 +227,30 @@ button.primary {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+button.link {
+  border: none;
+  padding: 2px 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #64748b;
+  background: transparent;
+  text-decoration: underline;
+}
+
+button.link:hover {
+  color: #1f2937;
+}
+
+.actions {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 12px -16px -16px;
+  padding: 10px 16px 16px;
+  background: #f6f7f9;
+  border-top: 1px solid #e6ebf2;
 }
